@@ -8,7 +8,7 @@ from asyncio import (
     get_event_loop,
     set_event_loop,
     run_coroutine_threadsafe,
-    AbstractEventLoop
+    AbstractEventLoop,
 )
 
 from aiohttp import ClientSession, ClientWebSocketResponse
@@ -72,7 +72,9 @@ class WebsocketClient:
         self._active = True
 
         if not self._loop:
-            self._loop = get_event_loop()
+            # self._loop = get_event_loop()
+            self._loop = self._session.loop
+
         start_event_loop(self._loop)
 
         run_coroutine_threadsafe(self._run(), self._loop)
