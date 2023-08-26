@@ -8,9 +8,9 @@ from asyncio import (
     get_running_loop,
     new_event_loop,
     set_event_loop,
-    set_event_loop,
     run_coroutine_threadsafe,
-    AbstractEventLoop
+    AbstractEventLoop,
+    TimeoutError
 )
 
 from aiohttp import ClientSession, ClientWebSocketResponse
@@ -37,8 +37,9 @@ class WebsocketClient:
         self._loop: AbstractEventLoop = None
 
         self._proxy: str = None
-        self._ping_interval: int = 60  # 秒
+        self._ping_interval: int = 10       # 秒
         self._header: dict = {}
+        self._receive_timeout: int = 60     # 秒
 
         self._last_sent_text: str = ""
         self._last_received_text: str = ""
@@ -48,7 +49,8 @@ class WebsocketClient:
         host: str,
         proxy_host: str = "",
         proxy_port: int = 0,
-        ping_interval: int = 60,
+        ping_interval: int = 10,
+        receive_timeout: int = 60,
         header: dict = None
     ):
         """
@@ -56,6 +58,7 @@ class WebsocketClient:
         """
         self._host = host
         self._ping_interval = ping_interval
+        self._receive_timeout = receive_timeout
 
         if header:
             self._header = header
@@ -88,9 +91,13 @@ class WebsocketClient:
         """
         self._active = False
 
+        if self._session:
+            coro = self._session.close()
+            run_coroutine_threadsafe(coro, self._loop).result()
+
         if self._ws:
             coro = self._ws.close()
-            run_coroutine_threadsafe(coro, self._loop)
+            run_coroutine_threadsafe(coro, self._loop).result()
 
         if self._loop and self._loop.is_running():
             self._loop.stop()
@@ -178,7 +185,8 @@ class WebsocketClient:
                 self._ws = await self._session.ws_connect(
                     self._host,
                     proxy=self._proxy,
-                    verify_ssl=False
+                    verify_ssl=False,
+                    receive_timeout=self._receive_timeout
                 )
 
                 # 调用连接成功回调
@@ -191,6 +199,17 @@ class WebsocketClient:
 
                     data: dict = self.unpack_data(text)
                     self.on_packet(data)
+
+                # 移除Websocket连接对象
+                self._ws = None
+
+                # 调用连接断开回调
+                self.on_disconnected()
+            # 接收数据超时重连
+            except TimeoutError:
+                # 关闭当前websocket连接
+                coro = self._ws.close()
+                run_coroutine_threadsafe(coro, self._loop)
 
                 # 移除Websocket连接对象
                 self._ws = None
